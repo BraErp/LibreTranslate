@@ -1,0 +1,23 @@
+name: Deploy APP
+
+on:
+  push:
+    branches: braerp-test
+
+  workflow_dispatch:
+
+jobs:
+  prod:
+    name: deploy cloudrun to prod environment
+    if: ${{ github.ref == 'refs/heads/braerp-test' || github.base_ref == 'braerp-test' }}
+    uses: ./.github/workflows/_deployment.yml
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+    with:
+      environment: production
+      ref: ${{ github.sha }}
+      service-name: braerp-fac
+      docker-repository: LibreTranslate
+    secrets: inherit

@@ -1,0 +1,75 @@
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        description: Name of the target environment.
+      ref:  
+        type: string
+        required: true
+        description: The tag or SHA to checkout.
+      service-name:
+        type: string
+        required: true
+        description: The service name.
+      docker-repository:
+        type: string
+        required: true
+        description: The docker repository image repository.
+
+jobs:
+
+  deploy:
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Google Auth
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          create_credentials_file: true
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GCP_REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+      - name: Get tag
+        id: get-tag
+        run: echo "short_ref=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
+
+      - id: docker-push-tagged
+        name: Tag Docker image and push to Google Artifact Registry
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: |
+              ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.docker-repository }}/${{ inputs.service-name }}-${{ inputs.environment }}:${{ inputs.ref }}
+              ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.docker-repository }}/${{ inputs.service-name }}-${{ inputs.environment }}:latest
+      - name: Create Service declaration   
+        run: |-
+          export CONTAINER_IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ inputs.docker-repository }}/${{ inputs.service-name }}-${{ inputs.environment }}:${{ inputs.ref }}"
+          export SERVICE_NAME="${{ inputs.service-name }}"
+          export PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          export REVISION_TAG="${{ inputs.ref }}"
+          export CLOUD_RUN_SA="${{ secrets.WIF_SERVICE_ACCOUNT }}"
+          export ENVIRONMENT="${{ inputs.environment }}"
+          envsubst < ./service.yaml > container-${{ inputs.environment }}.yaml
+          cat container-${{ inputs.environment }}.yaml
+      - name: Deploy to Cloud Run
+        id: deploy-cloudrun
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.service-name }}
+          region: ${{ secrets.GCP_REGION }}
+          metadata: container-${{ inputs.environment }}.yaml
