@@ -18,6 +18,6 @@ jobs:
     with:
       environment: production
       ref: ${{ github.sha }}
-      service-name: braerp-fac
-      docker-repository: LibreTranslate
+      service-name: LibreTranslate
+      docker-repository: braerp-libretranslate
     secrets: inherit
